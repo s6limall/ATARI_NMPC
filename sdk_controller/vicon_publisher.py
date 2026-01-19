@@ -11,35 +11,42 @@ from unitree_sdk2py.idl.default import unitree_go_msg_dds__SportModeState_
 from unitree_sdk2py.idl.unitree_go.msg.dds_ import SportModeState_
 from unitree_sdk2py.utils.thread import RecurrentThread
 
+
 class ViconHighStatePublisher:
     def __init__(self,
-                 vicon_ip : str,
-                 object_name : str,
-                 publish_freq : int = 100,
+                 vicon_ip: str,
+                 object_name: str,
+                 publish_freq: int = 100,
                  ):
+        print("Initializing Vicon HighState Publisher...")
         self.vicon_ip = vicon_ip
         self.object_name = object_name
         self.publish_freq = publish_freq
         self.hight_state_dt = 1.0 / self.publish_freq
-        
+
         self.is_connected = False
         self.vicon_client = pv.PyViconDatastream()
+        print("Connecting to Vicon HighState Publisher...")
         self.connect()
+        print("Finished connecting to Vicon HighState Publisher...")
 
         if self.is_connected == True:
             self.vicon_client.enable_segment_data()
             self.vicon_client.set_stream_mode(pv.StreamMode.ServerPush)
-            self.vicon_client.set_axis_mapping(pv.Direction.Forward, pv.Direction.Left, pv.Direction.Up)
+            self.vicon_client.set_axis_mapping(
+                pv.Direction.Forward, pv.Direction.Left, pv.Direction.Up)
             self.vicon_frame_rate = self.vicon_client.get_frame_rate()
             if self.vicon_frame_rate > 0:
                 self.vicon_dt = (1.0 / self.vicon_frame_rate)
             else:
                 self.vicon_dt = self.hight_state_dt * 1.5
         else:
-            raise RuntimeError(f"Failed to connect to Vicon at {self.vicon_ip}")
-        
+            raise RuntimeError(
+                f"Failed to connect to Vicon at {self.vicon_ip}")
+
         self.high_state = unitree_go_msg_dds__SportModeState_()
-        self.high_state_puber = ChannelPublisher(TOPIC_HIGHSTATE, SportModeState_)
+        self.high_state_puber = ChannelPublisher(
+            TOPIC_HIGHSTATE, SportModeState_)
         self.high_state_puber.Init()
         self.HighStateThread = RecurrentThread(
             interval=self.hight_state_dt, target=self.PublishHighState, name="base_highstate"
@@ -49,36 +56,39 @@ class ViconHighStatePublisher:
         )
         self.frame_number = -1
         self.t, self.prev_t, self.prev_prev_t = 0., 0., 0.
-        self.p, self.prev_p, self.prev_prev_p = np.zeros(3), np.zeros(3), np.zeros(3)
-        self.q, self.prev_q, self.prev_prev_q = np.zeros(4), np.zeros(4), np.zeros(4) # w, x, y, z
+        self.p, self.prev_p, self.prev_prev_p = np.zeros(
+            3), np.zeros(3), np.zeros(3)
+        self.q, self.prev_q, self.prev_prev_q = np.zeros(
+            4), np.zeros(4), np.zeros(4)  # w, x, y, z
         self.v = np.zeros(3)
         self.w = np.zeros(3)
-        
+
         self.start()
-        
+
     def start(self):
         self.HighStateThread.Start()
         self.ViconClientThread.Start()
         self.HighStateThread
-        
+
         timout = 5
         t = 0
         sleep = 0.1
-        
+        print("Waiting for Vicon HighState Publisher to start...")
         while t < timout:
             if self.frame_number > 0:
                 print("Vicon HighState Publisher started")
                 return
             time.sleep(sleep)
             t += sleep
-            
-        raise TimeoutError(f"Vicon HighState Publisher failed to start. No messages received.")       
-        
+
+        raise TimeoutError(
+            f"Vicon HighState Publisher failed to start. No messages received.")
+
     def connect(self, ip=None):
-        if ip is not None: # set
+        if ip is not None:  # set
             print(f"Changing IP of Vicon Host to: {ip}")
             self.vicon_ip = ip
-        
+
         ret = self.vicon_client.connect(self.vicon_ip)
         if ret != pv.Result.Success:
             print(f"Connection to {self.vicon_ip} failed")
@@ -87,26 +97,30 @@ class ViconHighStatePublisher:
             print(f"Connection to {self.vicon_ip} successful")
             self.is_connected = True
         return self.is_connected
-    
+
     def _update_angular_velocity(self):
         # local angular velocity
         dt = self.t - self.prev_prev_t
         # first order finite difference for quaternions
         self.w = (2 / dt) * np.array([
-            self.prev_prev_q[0]*self.q[1] - self.prev_prev_q[1]*self.q[0] - self.prev_prev_q[2]*self.q[3] + self.prev_prev_q[3]*self.q[2],
-            self.prev_prev_q[0]*self.q[2] + self.prev_prev_q[1]*self.q[3] - self.prev_prev_q[2]*self.q[0] - self.prev_prev_q[3]*self.q[1],
-            self.prev_prev_q[0]*self.q[3] - self.prev_prev_q[1]*self.q[2] + self.prev_prev_q[2]*self.q[1] - self.prev_prev_q[3]*self.q[0]
-            ])
+            self.prev_prev_q[0]*self.q[1] - self.prev_prev_q[1]*self.q[0] -
+            self.prev_prev_q[2]*self.q[3] + self.prev_prev_q[3]*self.q[2],
+            self.prev_prev_q[0]*self.q[2] + self.prev_prev_q[1]*self.q[3] -
+            self.prev_prev_q[2]*self.q[0] - self.prev_prev_q[3]*self.q[1],
+            self.prev_prev_q[0]*self.q[3] - self.prev_prev_q[1]*self.q[2] +
+            self.prev_prev_q[2]*self.q[1] - self.prev_prev_q[3]*self.q[0]
+        ])
 
         self.w[self.w < 0.04] = 0.0
-        
+
     def _update_linear_velocity(self):
         # global linear velocity
         avg_dt = (self.t - self.prev_prev_t) / 2.
         # Second order finite difference
-        self.v = (3 * self.p - 4 * self.prev_p + self.prev_prev_p) / (2 * avg_dt)
-        
-    def _update_p_q_t(self, new_p : np.ndarray, new_q : np.ndarray, new_t : float):
+        self.v = (3 * self.p - 4 * self.prev_p +
+                  self.prev_prev_p) / (2 * avg_dt)
+
+    def _update_p_q_t(self, new_p: np.ndarray, new_q: np.ndarray, new_t: float):
         # time
         self.prev_prev_t = self.prev_t
         self.prev_t = self.t
@@ -119,67 +133,74 @@ class ViconHighStatePublisher:
         self.prev_prev_q = self.prev_q
         self.prev_q = self.q
         self.q = new_q
-        
+
     def UpdateViconClient(self):
         if self.is_connected == True:
-            
+
             frame = self.vicon_client.get_frame()
             if frame == pv.Result.Success:
                 frame_number = self.vicon_client.get_frame_number()
                 # if new frame
                 if frame_number > self.frame_number:
                     self.frame_number = frame_number
-                        
+
                     subject_count = self.vicon_client.get_subject_count()
 
                     for subj_idx in range(subject_count):
-                        subject_name = self.vicon_client.get_subject_name(subj_idx)
-                        if subject_name != self.object_name: #Skip objects we are not interessted in
+                        subject_name = self.vicon_client.get_subject_name(
+                            subj_idx)
+                        if subject_name != self.object_name:  # Skip objects we are not interessted in
                             continue
-                        
-                        segment_count = self.vicon_client.get_segment_count(self.object_name)
+
+                        segment_count = self.vicon_client.get_segment_count(
+                            self.object_name)
                         for seg_idx in range(segment_count):
 
-                            segment_name = self.vicon_client.get_segment_name(self.object_name, seg_idx)
-                            segment_global_translation = self.vicon_client.get_segment_global_translation(self.object_name, segment_name)
-                            segment_global_quaternion     = self.vicon_client.get_segment_global_quaternion(self.object_name, segment_name)
+                            segment_name = self.vicon_client.get_segment_name(
+                                self.object_name, seg_idx)
+                            segment_global_translation = self.vicon_client.get_segment_global_translation(
+                                self.object_name, segment_name)
+                            segment_global_quaternion = self.vicon_client.get_segment_global_quaternion(
+                                self.object_name, segment_name)
                             latency = self.vicon_client.get_latency_total()
 
                             if segment_global_translation is not None and segment_global_quaternion is not None:
                                 t = time.time() - latency
-                                self._update_p_q_t(segment_global_translation, segment_global_quaternion, t)
+                                self._update_p_q_t(
+                                    segment_global_translation, segment_global_quaternion, t)
 
                                 if self.prev_t > 0.:
                                     self._update_angular_velocity()
                                 if self.prev_prev_t > 0.:
                                     self._update_linear_velocity()
-                                    
+
                                 return True
         return False
-                            
+
     def PublishHighState(self):
-        
+
         self.high_state.position[0] = self.p[0]
         self.high_state.position[1] = self.p[1]
         self.high_state.position[2] = self.p[2]
-        
+
         self.high_state.velocity[0] = self.v[0]
         self.high_state.velocity[1] = self.v[1]
         self.high_state.velocity[2] = self.v[2]
-        
+
         self.high_state.imu_state.quaternion[0] = self.q[0]
         self.high_state.imu_state.quaternion[1] = self.q[1]
         self.high_state.imu_state.quaternion[2] = self.q[2]
         self.high_state.imu_state.quaternion[3] = self.q[3]
-        
+
         self.high_state.imu_state.gyroscope[0] = self.w[0]
         self.high_state.imu_state.gyroscope[1] = self.w[1]
         self.high_state.imu_state.gyroscope[2] = self.w[2]
 
         self.high_state_puber.Write(self.high_state)
-        
+
+
 class ViconRecorder(ViconHighStatePublisher):
-    def __init__(self, vicon_ip : str, object_name : str):
+    def __init__(self, vicon_ip: str, object_name: str):
         self.data = {
             "p": [],
             "q": [],
@@ -189,7 +210,6 @@ class ViconRecorder(ViconHighStatePublisher):
         }
         super().__init__(vicon_ip, object_name)
 
-    
     def UpdateViconClient(self):
         # If new frame
         if super().UpdateViconClient():
@@ -200,7 +220,7 @@ class ViconRecorder(ViconHighStatePublisher):
             self.data["w"].append(self.w)
             return True
         return False
-    
+
     def save_data(self, filename: str):
         np.savez(
             filename,
@@ -210,7 +230,7 @@ class ViconRecorder(ViconHighStatePublisher):
             v=np.array(self.data["v"]),
             w=np.array(self.data["w"]),
         )
-    
+
     def plot_data(self):
         import matplotlib.pyplot as plt
 
@@ -269,17 +289,17 @@ class ViconRecorder(ViconHighStatePublisher):
         plt.legend()
         plt.grid()
         plt.show()
-        
-        
+
+
 if __name__ == "__main__":
     VICON_IP = "192.168.123.100:801"
     OBJECT_NAME = "Go2"
     RECORD_TIME = 50
-    
+
     ChannelFactoryInitialize(1, "lo")
     vicon = ViconRecorder(VICON_IP, OBJECT_NAME)
     time.sleep(RECORD_TIME)
     vicon.plot_data()
-    
+
     FILE_NAME = "data_recording.npz"
     vicon.save_data(FILE_NAME)

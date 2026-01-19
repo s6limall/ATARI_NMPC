@@ -29,35 +29,119 @@ KEY_MAP = {
     "left": 15,
 }
 
+
 class JoystickPublisher:
     def __init__(self,
-                 device_id = 0,
+                 device_id=0,
                  js_type="xbox",
                  publish_freq=100
                  ):
         self.device_id = device_id
         self.js_type = js_type
         self.publish_freq = publish_freq
-        
+
         self.joystick = None
         self.setup_joystick(device_id, js_type)
-        
+        print(f"Joystick detected: {self.joystick.get_name()}")
+
         self.wireless_controller = unitree_go_msg_dds__WirelessController_()
+        # print("ChannelPublisher for WirelessController initialized.")
+        # print("Using topic:", TOPIC_WIRELESS_CONTROLLER)
+        # print("TOPIC:", TOPIC_WIRELESS_CONTROLLER)
+        # print("WirelessController_ is:", WirelessController_)
+
         self.wireless_controller_puber = ChannelPublisher(
             TOPIC_WIRELESS_CONTROLLER, WirelessController_
         )
+        print("WirelessController Publisher created.")
         self.wireless_controller_puber.Init()
         self.WirelessControllerThread = RecurrentThread(
             interval=1/self.publish_freq,
             target=self.PublishWirelessController,
             name="sim_wireless_controller",
         )
-        
+
         self.start()
-        
+
     def PublishWirelessController(self):
+        print("Publishing wireless controller data...")
+        # print("Joystick:", self.joystick)
+        # print(self.js_type)
         if self.joystick != None:
             pygame.event.get()
+            
+            if self.js_type == "logitech":
+                # print("Using Logitech joystick mapping.")
+                key_state = [0] * 16
+                # print(
+                #     f"Select, Start: {self.joystick.get_button(self.button_id["SELECT"])}, {self.joystick.get_button(self.button_id["START"])}")
+                # Buttons
+                key_state[KEY_MAP["R1"]] = self.joystick.get_button(
+                    self.button_id["RB"])
+                key_state[KEY_MAP["L1"]] = self.joystick.get_button(
+                    self.button_id["LB"])
+                key_state[KEY_MAP["start"]] = self.joystick.get_button(
+                    self.button_id["START"])
+                key_state[KEY_MAP["select"]] = self.joystick.get_button(
+                    self.button_id["SELECT"])
+                key_state[KEY_MAP["R2"]] = 0  # (
+                # self.button_id["RT"])
+                key_state[KEY_MAP["L2"]] = 0  # (
+                # self.button_id["LT"])
+                key_state[KEY_MAP["F1"]] = 0
+                key_state[KEY_MAP["F2"]] = 0
+
+                key_state[KEY_MAP["A"]] = self.joystick.get_button(
+                    self.button_id["A"])
+                key_state[KEY_MAP["B"]] = self.joystick.get_button(
+                    self.button_id["B"])
+                key_state[KEY_MAP["X"]] = self.joystick.get_button(
+                    self.button_id["X"])
+                key_state[KEY_MAP["Y"]] = self.joystick.get_button(
+                    self.button_id["Y"])
+
+                # print("A: ", key_state[KEY_MAP["A"]], "B: ", key_state[KEY_MAP["B"]],
+                #       "X: ", key_state[KEY_MAP["X"]], "Y: ", key_state[KEY_MAP["Y"]])
+                # D-pad (from Axis 0/1)
+                # print("DX, DY: ", self.joystick.get_axis(self.axis_id["DX"]), self.joystick.get_axis(self.axis_id["DY"]))
+                dx = self.joystick.get_axis(self.axis_id["DX"])
+                dy = self.joystick.get_axis(self.axis_id["DY"])
+                key_state[KEY_MAP["up"]] = dy < -0.2
+                key_state[KEY_MAP["down"]] = dy > 0.2
+                key_state[KEY_MAP["left"]] = dx < -0.2
+                key_state[KEY_MAP["right"]] = dx > 0.2
+
+                # Combine into 16-bit key value
+                key_value = 0
+                for i in range(16):
+                    key_value += key_state[i] * i
+                self.wireless_controller.keys = key_value
+
+                # print("Joysticks: ")
+                # print("hats")
+                # print("hats: ", self.joystick.get_hat())
+                # print("axes: ", [self.joystick.get_axis(i) for i in range(self.joystick.get_numaxes())])
+                # Left joystick (from Hat 0)
+                hat_x, hat_y = self.joystick.get_hat(0)
+                self.wireless_controller.lx = hat_x
+                self.wireless_controller.ly = hat_y
+
+                # Right joystick (from Axis 2/3)
+                rx = self.joystick.get_axis(self.axis_id["RX"])
+                ry = self.joystick.get_axis(self.axis_id["RY"])
+                if abs(rx) < 0.1:
+                    rx = 0.0
+                if abs(ry) < 0.1:
+                    ry = 0.0
+                self.wireless_controller.rx = rx
+                self.wireless_controller.ry = ry
+
+                # print(f"lx: {self.wireless_controller.lx}, ly: {self.wireless_controller.ly}, "
+                #       f"rx: {self.wireless_controller.rx}, ry: {self.wireless_controller.ry}")
+                # Publish
+                self.wireless_controller_puber.Write(self.wireless_controller)
+                return
+
             key_state = [0] * 16
             key_state[KEY_MAP["R1"]] = self.joystick.get_button(
                 self.button_id["RB"]
@@ -79,10 +163,14 @@ class JoystickPublisher:
             )
             key_state[KEY_MAP["F1"]] = 0
             key_state[KEY_MAP["F2"]] = 0
-            key_state[KEY_MAP["A"]] = self.joystick.get_button(self.button_id["A"])
-            key_state[KEY_MAP["B"]] = self.joystick.get_button(self.button_id["B"])
-            key_state[KEY_MAP["X"]] = self.joystick.get_button(self.button_id["X"])
-            key_state[KEY_MAP["Y"]] = self.joystick.get_button(self.button_id["Y"])
+            key_state[KEY_MAP["A"]] = self.joystick.get_button(
+                self.button_id["A"])
+            key_state[KEY_MAP["B"]] = self.joystick.get_button(
+                self.button_id["B"])
+            key_state[KEY_MAP["X"]] = self.joystick.get_button(
+                self.button_id["X"])
+            key_state[KEY_MAP["Y"]] = self.joystick.get_button(
+                self.button_id["Y"])
             key_state[KEY_MAP["up"]] = self.joystick.get_hat(0)[1] > 0
             key_state[KEY_MAP["right"]] = self.joystick.get_hat(0)[0] > 0
             key_state[KEY_MAP["down"]] = self.joystick.get_hat(0)[1] < 0
@@ -90,20 +178,28 @@ class JoystickPublisher:
 
             key_value = 0
             for i in range(16):
-                key_value += key_state[i] << i
+                key_value += key_state[i] * i
 
             self.wireless_controller.keys = key_value
-            self.wireless_controller.lx = self.joystick.get_axis(self.axis_id["LX"])
-            self.wireless_controller.ly = -self.joystick.get_axis(self.axis_id["LY"])
-            self.wireless_controller.rx = self.joystick.get_axis(self.axis_id["RX"])
-            self.wireless_controller.ry = -self.joystick.get_axis(self.axis_id["RY"])
+            self.wireless_controller.lx = self.joystick.get_axis(
+                self.axis_id["LX"])
+            self.wireless_controller.ly = - \
+                self.joystick.get_axis(self.axis_id["LY"])
+            self.wireless_controller.rx = self.joystick.get_axis(
+                self.axis_id["RX"])
+            self.wireless_controller.ry = - \
+                self.joystick.get_axis(self.axis_id["RY"])
 
             self.wireless_controller_puber.Write(self.wireless_controller)
+        else:
+            print("No joystick connected.")
 
     def setup_joystick(self, device_id=0, js_type="xbox"):
+        print("Setting up joystick...")
         pygame.init()
         pygame.joystick.init()
         joystick_count = pygame.joystick.get_count()
+        print(f"Number of joysticks detected: {joystick_count}")
         if joystick_count > 0:
             self.joystick = pygame.joystick.Joystick(device_id)
             self.joystick.init()
@@ -156,27 +252,51 @@ class JoystickPublisher:
                 "SELECT": 10,
                 "START": 11,
             }
+
+        elif js_type == "logitech":
+            self.axis_id = {
+                "RX": 2,  # Right joystick X
+                "RY": 3,  # Right joystick Y
+                "DX": 0,  # D-pad X
+                "DY": 1,  # D-pad Y
+            }
+
+            self.button_id = {
+                "A": 1,
+                "B": 2,
+                "X": 0,
+                "Y": 3,
+                "LB": 4,
+                "RB": 5,
+                "LT": 6,
+                "RT": 7,
+                "SELECT": 8,
+                "START": 9,
+            }
         else:
             print("Unsupported gamepad. ")
-            
+
     def start(self):
         self.WirelessControllerThread.Start()
-        
+
         print("Press start with the joystick.")
-        timout = 5
+        timout = 30.0
         t = 0
         sleep = 0.05
-        
+
         start_button_id = KEY_MAP["start"]
-        
+        print(KEY_MAP["start"])
+
         while t < timout:
+
             if self.wireless_controller.keys != 0:
-                key_id = int(np.log2(self.wireless_controller.keys))
+                key_id = self.wireless_controller.keys
+                print(f"Received key id: {key_id} vs {start_button_id}")
                 if key_id == start_button_id:
                     print("Joystic started!")
                     return
-            
+
             time.sleep(sleep)
             t += sleep
-        
+
         raise TimeoutError(f"Joystick failed to start. No messages received.")
