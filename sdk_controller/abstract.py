@@ -55,33 +55,58 @@ class SDKControllerBase(ABC):
         self.pub = ChannelPublisher(TOPIC_LOWCMD, LowCmd_)
         self.pub.Init()
 
-        # Create a subscriber to subscribe to lowstate data
-        low_state_sub = ChannelSubscriber(TOPIC_LOWSTATE, LowState_)
-        hight_state_sub = ChannelSubscriber(TOPIC_HIGHSTATE, SportModeState_)
-        joystick_sub = ChannelSubscriber(
+        # Create subscribers - store as instance attributes to prevent garbage collection
+        self.low_state_sub = ChannelSubscriber(TOPIC_LOWSTATE, LowState_)
+        self.high_state_sub = ChannelSubscriber(TOPIC_HIGHSTATE, SportModeState_)
+        self.joystick_sub = ChannelSubscriber(
             TOPIC_WIRELESS_CONTROLLER, WirelessController_)
-        low_state_sub.Init(self.low_state_handler, 10)
-        hight_state_sub.Init(self.high_state_handler, 10)
-        joystick_sub.Init(self.wireless_handler, 1)
+        self.low_state_sub.Init(self.low_state_handler, 10)
+        self.high_state_sub.Init(self.high_state_handler, 10)
+        self.joystick_sub.Init(self.wireless_handler, 10)
 
+        print("Subscribers initialized, waiting for messages...")
         self.wait_subscriber()
         print("Controller ready!")
 
     def wait_subscriber(self) -> bool:
-        timeout = 5.
+        timeout = 10.
         t = 0.
         sleep = 0.1
         while t < timeout:
             if (self.last_high_state is not None and
-                    self.last_low_state is not None):
+                    self.last_low_state is not None and
+                    self.last_wireless is not None):
+                print(f"All subscribers received messages after {t:.1f}s")
                 return True
+            status = (
+                f"high={'OK' if self.last_high_state is not None else 'WAITING'}, "
+                f"low={'OK' if self.last_low_state is not None else 'WAITING'}, "
+                f"wireless={'OK' if self.last_wireless is not None else 'WAITING'}"
+            )
+            print(f"  Waiting for subscribers ({t:.1f}s/{timeout:.1f}s): {status}", flush=True)
             t += sleep
             time.sleep(sleep)
 
+        # After timeout, report which subscribers are missing
+        missing = []
         if self.last_high_state is None:
-            raise TimeoutError("No highstate msg received.")
+            missing.append("highstate")
         if self.last_low_state is None:
-            raise TimeoutError("No lowstate msg received.")
+            missing.append("lowstate")
+        if self.last_wireless is None:
+            missing.append("wireless")
+
+        if missing:
+            print(f"WARNING: Timeout waiting for subscribers: {', '.join(missing)}")
+            # lowstate requires robot to be in low-level SDK mode — warn but continue
+            if self.last_high_state is None:
+                raise TimeoutError("No highstate msg received. Is the Vicon/simulation running?")
+            if self.last_wireless is None:
+                raise TimeoutError("No wireless controller msg received. Is the joystick connected?")
+            if self.last_low_state is None:
+                print("WARNING: No lowstate received. Is the robot powered on and in low-level SDK mode?")
+                print("WARNING: Continuing without lowstate — joint data will not be available until robot responds.")
+        return True
 
     def wireless_handler(self, msg: WirelessController_):
         self.last_wireless = msg
@@ -156,12 +181,14 @@ class SDKController(SDKControllerBase):
         self.update_q_v_from_lowstate()
 
     def wireless_handler(self, msg):
+        # print("Initial wireless handler in SDKController called.")
         super().wireless_handler(msg)
         last_key = self.get_last_key()
         t = time.time()
         # Cannot change mode if already running
         # Change mode anytime while controller running
         if last_key:
+            print(f"Key pressed: {last_key}")
             # Switching off from controller -> reset
             if (self.controller_running and last_key in "ABY"):
                 self.controller_running = False

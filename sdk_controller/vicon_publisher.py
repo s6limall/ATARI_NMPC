@@ -85,6 +85,7 @@ class ViconHighStatePublisher:
             f"Vicon HighState Publisher failed to start. No messages received.")
 
     def connect(self, ip=None):
+        print("Connecting to Vicon...")
         if ip is not None:  # set
             print(f"Changing IP of Vicon Host to: {ip}")
             self.vicon_ip = ip
@@ -292,14 +293,17 @@ class ViconRecorder(ViconHighStatePublisher):
 
 
 if __name__ == "__main__":
-    VICON_IP = "192.168.123.100:801"
+    VICON_IP = "131.220.7.195:801"
     OBJECT_NAME = "Go2"
-    RECORD_TIME = 50
+    NETWORK_IFACE = "enp5s0"
+    RECORD_TIME = 20
 
-    ChannelFactoryInitialize(1, "lo")
+    ChannelFactoryInitialize(0, NETWORK_IFACE)
     vicon = ViconRecorder(VICON_IP, OBJECT_NAME)
-    time.sleep(RECORD_TIME)
-    vicon.plot_data()
+    for _ in range(RECORD_TIME):
+        time.sleep(1.0)
+        print(f"Time left: {RECORD_TIME - _} seconds")
 
     FILE_NAME = "data_recording.npz"
     vicon.save_data(FILE_NAME)
+    vicon.plot_data()

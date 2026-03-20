@@ -64,12 +64,12 @@ class JoystickPublisher:
         self.start()
 
     def PublishWirelessController(self):
-        print("Publishing wireless controller data...")
+        # print("Publishing wireless controller data...")
         # print("Joystick:", self.joystick)
         # print(self.js_type)
         if self.joystick != None:
             pygame.event.get()
-            
+
             if self.js_type == "logitech":
                 # print("Using Logitech joystick mapping.")
                 key_state = [0] * 16
@@ -104,12 +104,11 @@ class JoystickPublisher:
                 #       "X: ", key_state[KEY_MAP["X"]], "Y: ", key_state[KEY_MAP["Y"]])
                 # D-pad (from Axis 0/1)
                 # print("DX, DY: ", self.joystick.get_axis(self.axis_id["DX"]), self.joystick.get_axis(self.axis_id["DY"]))
-                dx = self.joystick.get_axis(self.axis_id["DX"])
-                dy = self.joystick.get_axis(self.axis_id["DY"])
-                key_state[KEY_MAP["up"]] = dy < -0.2
-                key_state[KEY_MAP["down"]] = dy > 0.2
-                key_state[KEY_MAP["left"]] = dx < -0.2
-                key_state[KEY_MAP["right"]] = dx > 0.2
+                # dx, dy = self.joystick.get_hat(0)
+                # key_state[KEY_MAP["up"]] = dy > 0
+                # key_state[KEY_MAP["down"]] = dy < 0
+                # key_state[KEY_MAP["left"]] = dx < 0
+                # key_state[KEY_MAP["right"]] = dx > 0
 
                 # Combine into 16-bit key value
                 key_value = 0
@@ -122,9 +121,14 @@ class JoystickPublisher:
                 # print("hats: ", self.joystick.get_hat())
                 # print("axes: ", [self.joystick.get_axis(i) for i in range(self.joystick.get_numaxes())])
                 # Left joystick (from Hat 0)
-                hat_x, hat_y = self.joystick.get_hat(0)
-                self.wireless_controller.lx = hat_x
-                self.wireless_controller.ly = hat_y
+                lx = self.joystick.get_axis(self.axis_id["LX"])
+                ly = self.joystick.get_axis(self.axis_id["LY"])
+                if abs(lx) < 0.1:
+                    lx = 0.0
+                if abs(ly) < 0.1:
+                    ly = 0.0
+                self.wireless_controller.lx = lx
+                self.wireless_controller.ly = ly
 
                 # Right joystick (from Axis 2/3)
                 rx = self.joystick.get_axis(self.axis_id["RX"])
@@ -254,24 +258,27 @@ class JoystickPublisher:
             }
 
         elif js_type == "logitech":
+            print("Using Logitech joystick mapping here.")
             self.axis_id = {
-                "RX": 2,  # Right joystick X
-                "RY": 3,  # Right joystick Y
-                "DX": 0,  # D-pad X
-                "DY": 1,  # D-pad Y
+                "LX": 0,  # Left stick axis x
+                "LY": 1,  # Left stick axis y
+                "LT": 2,  # Left trigger
+                "RX": 3,  # Right stick axis x
+                "RY": 4,  # Right stick axis y
+                "RT": 5,  # Right trigger
+                "DX": 6,  # Directional pad x
+                "DY": 7,  # Directional pad y
             }
 
             self.button_id = {
-                "A": 1,
-                "B": 2,
-                "X": 0,
+                "A": 0,
+                "B": 1,
+                "X": 2,
                 "Y": 3,
                 "LB": 4,
                 "RB": 5,
-                "LT": 6,
-                "RT": 7,
-                "SELECT": 8,
-                "START": 9,
+                "SELECT": 6,
+                "START": 7,
             }
         else:
             print("Unsupported gamepad. ")

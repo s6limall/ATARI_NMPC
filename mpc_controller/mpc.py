@@ -740,4 +740,5 @@ class LocomotionMPC(PinController):
             self.executor.shutdown(wait=True, cancel_futures=True)
             time.sleep(0.1)
             self.executor.shutdown(wait=False, cancel_futures=self.optimize_future.running())
-        if self.velocity_goal: self.velocity_goal._stop_update_thread()
+        if hasattr(self, 'velocity_goal') and self.velocity_goal:
+            self.velocity_goal._stop_update_thread()

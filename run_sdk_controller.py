@@ -1,19 +1,17 @@
+from unitree_sdk2py.utils.crc import CRC
+from unitree_sdk2py.idl.unitree_go.msg.dds_ import WirelessController_
+from unitree_sdk2py.idl.default import unitree_go_msg_dds__WirelessController_
+from unitree_sdk2py.core.channel import ChannelFactoryInitialize
+from mj_pin.utils import get_robot_description
+from sdk_controller.abstract import SDKController
+from mpc_controller.config.quadruped.utils import get_quadruped_config
+from mpc_controller.mpc import LocomotionMPC
 import time
 import sys
 import numpy as np
 
 import faulthandler
 faulthandler.enable()
-
-from mpc_controller.mpc import LocomotionMPC
-from mpc_controller.config.quadruped.utils import get_quadruped_config
-from sdk_controller.abstract import SDKController
-from mj_pin.utils import get_robot_description
-
-from unitree_sdk2py.core.channel import ChannelFactoryInitialize
-from unitree_sdk2py.idl.default import unitree_go_msg_dds__WirelessController_
-from unitree_sdk2py.idl.unitree_go.msg.dds_ import WirelessController_
-from unitree_sdk2py.utils.crc import CRC
 
 
 class MPC_SDK(SDKController):
@@ -35,10 +33,10 @@ class MPC_SDK(SDKController):
 
     def wireless_handler(self, msg: WirelessController_):
         super().wireless_handler(msg)
-        self.mpc.set_command(
-            v_des=np.round([msg.ly * self.v_max, -msg.lx * self.v_max, 0.], 2),
-            w_yaw=-round(msg.rx * self.w_max, 1)
-        )
+        v_des = np.round([msg.ly * self.v_max, -msg.lx * self.v_max, 0.], 2)
+        w_yaw = -round(msg.rx * self.w_max, 1)
+
+        self.mpc.set_command(v_des=v_des, w_yaw=w_yaw)
 
     def update_motor_cmd(self, time):
         torques_ff = self.mpc._compute_torques_ff(time, self._q, self._v)
@@ -83,13 +81,20 @@ if __name__ == '__main__':
     from sdk_controller.vicon_publisher import ViconHighStatePublisher
 
     if len(sys.argv) < 2:
-        ChannelFactoryInitialize(1, "lo")
+        interface = "lo"
+        ChannelFactoryInitialize(1, interface)
+        print(
+            f"Initializing SDK with interface: {interface}, domain: 1 (simulation mode)")
         joystick = JoystickPublisher(device_id=0, js_type="logitech")
         simulate = True
     else:
-        ChannelFactoryInitialize(1, sys.argv[1])
-
+        interface = sys.argv[1]
+        interface = "enx503eaadfddca"
+        ChannelFactoryInitialize(0, interface)
+        print(
+            f"Initializing SDK with interface: {interface}, domain: 0 (hardware mode)")
         joystick = JoystickPublisher(device_id=0, js_type="logitech")
+        simulate = False
         vicon = ViconHighStatePublisher(
             vicon_ip=VICON_IP,
             object_name=Go2.OBJECT_NAME,
@@ -104,8 +109,9 @@ if __name__ == '__main__':
     config_gait, config_opt, config_cost = get_quadruped_config(
         gait_name, Go2.ROBOT_NAME)
     config_gait.nominal_period = 0.5
-    config_opt.recompile = False
+    config_opt.recompile = True
 
+    print(f"Initializing MPC with gait: {gait_name}")
     mpc = LocomotionMPC(
         path_urdf=robot_desc.urdf_path,
         feet_frame_names=feet_frame_names,
@@ -117,14 +123,52 @@ if __name__ == '__main__':
         print_info=True,
         solve_async=True,
     )
+    print("MPC initialized.")
 
     sdk_controller = MPC_SDK(simulate, mpc, Go2)
 
+    print("Starting main control loop. Press Ctrl+C to exit.")
+    last_heartbeat = 0.
+    loop_count = 0
+
     try:
+        wall_start = time.perf_counter()
+        stall_threshold_ms = 50.0  # warn if a single loop takes > 50ms
         while True:
             step_start = time.perf_counter()
 
-            sdk_controller.send_motor_command(runing_time)
+            try:
+                sdk_controller.send_motor_command(runing_time)
+            except Exception as e:
+                print(
+                    f"ERROR in send_motor_command at t={runing_time:.3f}s: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
+                break
+
+            step_time_ms = (time.perf_counter() - step_start) * 1000
+            loop_count += 1
+
+            # Warn on any loop that took too long (GIL stall / blocking call)
+            if step_time_ms > stall_threshold_ms:
+                print(
+                    f"  STALL loop={loop_count} t={runing_time:.2f}s step={step_time_ms:.1f}ms", flush=True)
+
+            # Periodic heartbeat every 2 seconds (use wall-clock to survive stalls)
+            wall_now = time.perf_counter() - wall_start
+            if wall_now - last_heartbeat >= 2.0:
+                mode = "CONTROLLER" if sdk_controller.controller_running else \
+                       "STAND_UP" if sdk_controller.stand_up_running else \
+                       "STAND_DOWN" if sdk_controller.stand_down_running else \
+                       "DAMPING" if sdk_controller.damping_running else "IDLE"
+                print(
+                    f"[wall={wall_now:.1f}s sim={runing_time:.1f}s] mode={mode} loops={loop_count} step={step_time_ms:.1f}ms", flush=True)
+                last_heartbeat = wall_now
+
+            # Print first few loops to verify it's running
+            if loop_count <= 3:
+                print(
+                    f"  Loop {loop_count}: send_motor_command took {step_time_ms:.1f}ms", flush=True)
 
             runing_time += dt
             time_until_next_step = dt - (time.perf_counter() - step_start)
@@ -132,9 +176,11 @@ if __name__ == '__main__':
                 time.sleep(time_until_next_step)
 
     except KeyboardInterrupt:
-        print(mpc.print_timings())
-        mpc.plot_traj("q")
-        mpc.plot_traj("v")
-        mpc.plot_traj("f")
-        mpc.plot_traj("tau")
-        mpc.show_plots()
+        print("\nShutting down...")
+        try:
+            print(mpc.print_timings())
+        except Exception as e:
+            print(f"Error printing timings: {e}")
+        # Force exit — background DDS/Vicon/Joystick threads won't stop on their own
+        import os
+        os._exit(0)
