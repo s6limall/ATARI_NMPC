@@ -61,6 +61,7 @@ class JoystickPublisher:
             name="sim_wireless_controller",
         )
 
+        self._dbg_print_count = 0  # throttle debug prints
         self.start()
 
     def PublishWirelessController(self):
@@ -71,6 +72,22 @@ class JoystickPublisher:
             pygame.event.get()
 
             if self.js_type == "logitech":
+                # ── RAW AXIS DEBUG (prints every 100 calls = ~1 s at 100 Hz) ──
+                self._dbg_print_count += 1
+                if self._dbg_print_count % 100 == 1:
+                    n_axes = self.joystick.get_numaxes()
+                    n_btns = self.joystick.get_numbuttons()
+                    raw_axes = [round(self.joystick.get_axis(i), 3)
+                                for i in range(n_axes)]
+                    raw_btns = [self.joystick.get_button(
+                        i) for i in range(n_btns)]
+                    print(
+                        f"[JOY DBG #{self._dbg_print_count}]  axes({n_axes}): {raw_axes}  btns({n_btns}): {raw_btns}", flush=True)
+                    print(f"           mapped → LX=axis{self.axis_id['LX']}:{raw_axes[self.axis_id['LX']] if self.axis_id['LX'] < n_axes else 'OOB'}"
+                          f"  LY=axis{self.axis_id['LY']}:{raw_axes[self.axis_id['LY']] if self.axis_id['LY'] < n_axes else 'OOB'}"
+                          f"  RX=axis{self.axis_id['RX']}:{raw_axes[self.axis_id['RX']] if self.axis_id['RX'] < n_axes else 'OOB'}"
+                          f"  RY=axis{self.axis_id['RY']}:{raw_axes[self.axis_id['RY']] if self.axis_id['RY'] < n_axes else 'OOB'}", flush=True)
+                # ────────────────────────────────────────────────────────────────
                 # print("Using Logitech joystick mapping.")
                 key_state = [0] * 16
                 # print(
@@ -122,7 +139,8 @@ class JoystickPublisher:
                 # print("axes: ", [self.joystick.get_axis(i) for i in range(self.joystick.get_numaxes())])
                 # Left joystick (from Hat 0)
                 lx = self.joystick.get_axis(self.axis_id["LX"])
-                ly = self.joystick.get_axis(self.axis_id["LY"])
+                # negate: pygame Y is negative when pushed forward
+                ly = -self.joystick.get_axis(self.axis_id["LY"])
                 if abs(lx) < 0.1:
                     lx = 0.0
                 if abs(ly) < 0.1:
@@ -132,7 +150,8 @@ class JoystickPublisher:
 
                 # Right joystick (from Axis 2/3)
                 rx = self.joystick.get_axis(self.axis_id["RX"])
-                ry = self.joystick.get_axis(self.axis_id["RY"])
+                # negate: pygame Y is negative when pushed forward
+                ry = -self.joystick.get_axis(self.axis_id["RY"])
                 if abs(rx) < 0.1:
                     rx = 0.0
                 if abs(ry) < 0.1:
@@ -140,8 +159,9 @@ class JoystickPublisher:
                 self.wireless_controller.rx = rx
                 self.wireless_controller.ry = ry
 
-                # print(f"lx: {self.wireless_controller.lx}, ly: {self.wireless_controller.ly}, "
-                #       f"rx: {self.wireless_controller.rx}, ry: {self.wireless_controller.ry}")
+                if lx != 0.0 or ly != 0.0 or rx != 0.0:
+                    print(
+                        f"[JOY] publishing  lx={lx:.2f}  ly={ly:.2f}  rx={rx:.2f}  keys={self.wireless_controller.keys}", flush=True)
                 # Publish
                 self.wireless_controller_puber.Write(self.wireless_controller)
                 return

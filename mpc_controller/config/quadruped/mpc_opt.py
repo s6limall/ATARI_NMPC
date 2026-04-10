@@ -4,23 +4,24 @@ from typing import List, Tuple
 from ..config_abstract import MPCOptConfig
 from contact_tamp.traj_opt_acados.interface.acados_helper import HPIPM_MODE
 
+
 @dataclass
 class MPCQuadrupedCyclic(MPCOptConfig):
-    ### MPC Config
+    # MPC Config
     # Time horizon (s)
-    time_horizon : float = 1.
+    time_horizon: float = 1.
     # Number of optimization nodes
-    n_nodes : int = 30
+    n_nodes: int = 30
     # Replanning frequency
-    replanning_freq : int = 20
+    replanning_freq: int = 20
     # gain on joint position for torque PD
-    Kp : float = 20.
+    Kp: float = 20.
     # gain on joint velocities for torque PD
-    Kd : float = 1.75
-    ### Solver Config
+    Kd: float = 1.75
+    # Solver Config
     # Recompile solver
     recompile: bool = False
     # Solver maximum SQP iterations
-    max_iter : int = 1
-    # Maximum qp iteration for one SQP step 
+    max_iter: int = 3
+    # Maximum qp iteration for one SQP step
     max_qp_iter: int = 6

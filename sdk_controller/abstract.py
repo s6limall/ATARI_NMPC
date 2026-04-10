@@ -1,23 +1,48 @@
+from unitree_sdk2py.utils.crc import CRC
+from unitree_sdk2py.idl.unitree_go.msg.dds_ import WirelessController_
+from unitree_sdk2py.idl.unitree_go.msg.dds_ import SportModeState_
+from unitree_sdk2py.idl.unitree_go.msg.dds_ import LowState_
+from unitree_sdk2py.idl.unitree_go.msg.dds_ import LowCmd_
+from unitree_sdk2py.idl.default import unitree_go_msg_dds__WirelessController_
+from unitree_sdk2py.idl.default import unitree_go_msg_dds__SportModeState_
+from unitree_sdk2py.idl.default import unitree_go_msg_dds__LowState_
+from unitree_sdk2py.idl.default import unitree_go_msg_dds__LowCmd_
+from unitree_sdk2py.core.channel import ChannelFactoryInitialize
+from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber
+from mj_pin.utils import get_robot_description, mj_joint_name2act_id, mj_joint_name2dof
+from sdk_controller.joystick import KEY_MAP
 import time
+import os
 import numpy as np
 import mujoco
 from abc import ABC, abstractmethod
 
 from sdk_controller.topics import TOPIC_HIGHSTATE, TOPIC_LOWCMD, TOPIC_LOWSTATE, TOPIC_HIGHSTATE, TOPIC_WIRELESS_CONTROLLER
-from sdk_controller.joystick import KEY_MAP
-from mj_pin.utils import get_robot_description, mj_joint_name2act_id, mj_joint_name2dof
 
-from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber
-from unitree_sdk2py.core.channel import ChannelFactoryInitialize
-from unitree_sdk2py.idl.default import unitree_go_msg_dds__LowCmd_
-from unitree_sdk2py.idl.default import unitree_go_msg_dds__LowState_
-from unitree_sdk2py.idl.default import unitree_go_msg_dds__SportModeState_
-from unitree_sdk2py.idl.default import unitree_go_msg_dds__WirelessController_
-from unitree_sdk2py.idl.unitree_go.msg.dds_ import LowCmd_
-from unitree_sdk2py.idl.unitree_go.msg.dds_ import LowState_
-from unitree_sdk2py.idl.unitree_go.msg.dds_ import SportModeState_
-from unitree_sdk2py.idl.unitree_go.msg.dds_ import WirelessController_
-from unitree_sdk2py.utils.crc import CRC
+# ── Transform debugger ────────────────────────────────────────────────────────
+_DBG_LOG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "debug_transform.log")
+_dbg_call_count = 0
+
+
+def _dbg_write(tag: str, **fields):
+    """Write one labelled block to the debug log every 80 calls (~1 s at 80 Hz)."""
+    global _dbg_call_count
+    _dbg_call_count += 1
+    if _dbg_call_count % 80 != 1:
+        return
+    lines = [f"\n{'='*60}",
+             f"[{tag}]  call #{_dbg_call_count}  wall={time.time():.3f}"]
+    for k, v in fields.items():
+        if isinstance(v, np.ndarray):
+            lines.append(f"  {k:30s}: {np.round(v.ravel(), 6).tolist()}")
+        else:
+            lines.append(f"  {k:30s}: {v}")
+    with open(_DBG_LOG, "a") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+# ─────────────────────────────────────────────────────────────────────────────
+
 
 try:
     from sdk_controller.safety import SafetyLayer
@@ -57,7 +82,8 @@ class SDKControllerBase(ABC):
 
         # Create subscribers - store as instance attributes to prevent garbage collection
         self.low_state_sub = ChannelSubscriber(TOPIC_LOWSTATE, LowState_)
-        self.high_state_sub = ChannelSubscriber(TOPIC_HIGHSTATE, SportModeState_)
+        self.high_state_sub = ChannelSubscriber(
+            TOPIC_HIGHSTATE, SportModeState_)
         self.joystick_sub = ChannelSubscriber(
             TOPIC_WIRELESS_CONTROLLER, WirelessController_)
         self.low_state_sub.Init(self.low_state_handler, 10)
@@ -83,7 +109,8 @@ class SDKControllerBase(ABC):
                 f"low={'OK' if self.last_low_state is not None else 'WAITING'}, "
                 f"wireless={'OK' if self.last_wireless is not None else 'WAITING'}"
             )
-            print(f"  Waiting for subscribers ({t:.1f}s/{timeout:.1f}s): {status}", flush=True)
+            print(
+                f"  Waiting for subscribers ({t:.1f}s/{timeout:.1f}s): {status}", flush=True)
             t += sleep
             time.sleep(sleep)
 
@@ -97,15 +124,20 @@ class SDKControllerBase(ABC):
             missing.append("wireless")
 
         if missing:
-            print(f"WARNING: Timeout waiting for subscribers: {', '.join(missing)}")
+            print(
+                f"WARNING: Timeout waiting for subscribers: {', '.join(missing)}")
             # lowstate requires robot to be in low-level SDK mode — warn but continue
             if self.last_high_state is None:
-                raise TimeoutError("No highstate msg received. Is the Vicon/simulation running?")
+                raise TimeoutError(
+                    "No highstate msg received. Is the Vicon/simulation running?")
             if self.last_wireless is None:
-                raise TimeoutError("No wireless controller msg received. Is the joystick connected?")
+                raise TimeoutError(
+                    "No wireless controller msg received. Is the joystick connected?")
             if self.last_low_state is None:
-                print("WARNING: No lowstate received. Is the robot powered on and in low-level SDK mode?")
-                print("WARNING: Continuing without lowstate — joint data will not be available until robot responds.")
+                print(
+                    "WARNING: No lowstate received. Is the robot powered on and in low-level SDK mode?")
+                print(
+                    "WARNING: Continuing without lowstate — joint data will not be available until robot responds.")
         return True
 
     def wireless_handler(self, msg: WirelessController_):
@@ -121,7 +153,7 @@ class SDKControllerBase(ABC):
         if self.last_wireless.keys == 0.:
             return None
         key_id = int(self.last_wireless.keys)
-        #print(f"Last key id: {key_id} -> {self.key_map[key_id]}")
+        # print(f"Last key id: {key_id} -> {self.key_map[key_id]}")
         return self.key_map[key_id]
 
 
@@ -167,17 +199,36 @@ class SDKController(SDKControllerBase):
         self.stand_up_duration = 3.5
         self.stand_down_duration = 3.5
 
+        # ── diagnostic state ──────────────────────────────────────────────
+        self._diag_highstate_wall = 0.0   # wall-clock of last HighState cb
+        self._diag_lowstate_wall = 0.0    # wall-clock of last LowState cb
+        self._diag_mj_time = 0.0          # mj_data.time from bridge
+        self._diag_true_base_pos = np.zeros(3)  # true base COM pos
+        self._diag_true_base_vel = np.zeros(3)  # true base COM vel
+        # ─────────────────────────────────────────────────────────────────
+
         super().__init__()
 
     def high_state_handler(self, msg):
         super().high_state_handler(msg)
+        self._diag_highstate_wall = time.perf_counter()
+        # Extract diagnostic ground-truth from smuggled bridge fields
+        # (only valid in simulation — on real robot these fields have real SDK meaning)
         if self.simulate:
+            self._diag_mj_time = getattr(msg, 'foot_raise_height', 0.0)
+            fpb = getattr(msg, 'foot_position_body', None)
+            fsb = getattr(msg, 'foot_speed_body', None)
+            if fpb is not None and len(fpb) >= 3:
+                self._diag_true_base_pos[:] = fpb[:3]
+            if fsb is not None and len(fsb) >= 3:
+                self._diag_true_base_vel[:] = fsb[:3]
             self.update_q_v_from_highstate_simulation()
         else:
             self.update_q_v_from_highstate()
 
     def low_state_handler(self, msg):
         super().low_state_handler(msg)
+        self._diag_lowstate_wall = time.perf_counter()
         self.update_q_v_from_lowstate()
 
     def wireless_handler(self, msg):
@@ -253,6 +304,16 @@ class SDKController(SDKControllerBase):
             self._q[dof + self.off] = motor.q  # Joint position
             self._v[dof] = motor.dq  # Joint velocity
 
+        _dbg_write("LOWSTATE",
+                   imu_quat=np.array(self.last_low_state.imu_state.quaternion),
+                   imu_quat_norm=float(np.linalg.norm(
+                       self.last_low_state.imu_state.quaternion)),
+                   imu_gyro=np.array(self.last_low_state.imu_state.gyroscope),
+                   q_3_7_stored=self._q[3:7].copy(),
+                   v_3_6_stored=self._v[3:6].copy(),
+                   joint_q=self._q[7:].copy(),
+                   )
+
     def update_q_v_from_highstate_simulation(self):
         """Converts IMU velocity to base frame velocity."""
         if self._q is None or self._v is None:
@@ -260,6 +321,21 @@ class SDKController(SDKControllerBase):
 
         p_imu_B = self.robot_config.P_IMU_IN_BASE
         R_imu_B = self.robot_config.R_IMU_IN_BASE
+
+        # ── debug: snapshot inputs before transformation ───────────────────
+        _dbg_imu_quat_in = self._q[3:7].copy()
+        _dbg_high_pos = np.array(self.last_high_state.position[:3])
+        _dbg_high_vel = np.array(self.last_high_state.velocity[:3])
+        _dbg_write("HIGHSTATE_SIM_INPUT",
+                   imu_quat_from_lowstate=_dbg_imu_quat_in,
+                   imu_quat_norm=float(np.linalg.norm(_dbg_imu_quat_in)),
+                   high_state_position=_dbg_high_pos,
+                   high_state_velocity=_dbg_high_vel,
+                   P_IMU_IN_BASE=p_imu_B,
+                   R_IMU_IN_BASE=R_imu_B.ravel(),
+                   angular_vel_body=self._v[3:6].copy(),
+                   )
+        # ──────────────────────────────────────────────────────────────────
 
         # Convert quaternion to rotation matrix
         R_IMU_W_flat = np.zeros(9)
@@ -274,6 +350,25 @@ class SDKController(SDKControllerBase):
         self._v[0:3] = self.last_high_state.velocity + \
             np.cross(R_B_W @ self._v[3:6], self._q[0:3] -
                      self.last_high_state.position)
+
+        # ── debug: snapshot outputs after transformation ───────────────────
+        _dbg_write("HIGHSTATE_SIM_OUTPUT",
+                   base_position_q=self._q[0:3].copy(),
+                   base_quat_out=self._q[3:7].copy(),
+                   base_quat_out_norm=float(np.linalg.norm(self._q[3:7])),
+                   base_lin_vel=self._v[0:3].copy(),
+                   base_ang_vel_body=self._v[3:6].copy(),
+                   R_W_IMU_row0=R_imu_W[0].copy(),
+                   R_W_IMU_row1=R_imu_W[1].copy(),
+                   R_W_IMU_row2=R_imu_W[2].copy(),
+                   R_W_IMU_det=float(np.linalg.det(R_imu_W)),
+                   R_B_W_row0=R_B_W[0].copy(),
+                   R_B_W_row1=R_B_W[1].copy(),
+                   R_B_W_row2=R_B_W[2].copy(),
+                   R_B_W_det=float(np.linalg.det(R_B_W)),
+                   lever_arm=self._q[0:3] - _dbg_high_pos,
+                   )
+        # ──────────────────────────────────────────────────────────────────
 
     def update_q_v_from_highstate(self):
         """Extracts q (position) and v (velocity) from a Unitree HighState_ message."""

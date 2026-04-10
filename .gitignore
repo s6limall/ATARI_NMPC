@@ -57,6 +57,8 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+trajectory_logs/
+violation_snapshots/
 
 # Translations
 *.mo
